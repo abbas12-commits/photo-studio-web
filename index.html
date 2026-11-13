@@ -3203,6 +3203,77 @@ document.addEventListener('DOMContentLoaded', function(){
     Array.prototype.forEach.call(sheet.querySelectorAll('[data-ov]'), function(b){ b.addEventListener('click', function(){ or.value=b.getAttribute('data-ov'); or.dispatchEvent(new Event('change',{bubbles:true})); closeSheet(); }); });
   });
 
+  /* ===== «🔍 دقة الصورة» للمستمسكات (الهاتف): داخل قائمة الورق تحت «الاتجاه» (إضافة معزولة) =====
+     - مستمسك محدد: يوضّح هو فقط — بدون تحديد: يوضّح كل المستمسكات بالورقة
+     - «↩️ الأصل» يرجع الصورة كما كانت قبل التوضيح */
+  (function(){
+    if(!window.__AIX || !$('dmPaperBtn')) return;
+    var box=document.createElement('div'); box.className='enh-box'; box.id='pcDEnh';
+    box.innerHTML='<div class="enh-title">🔍 دقة الصورة <small id="pcDEnhTgt"></small></div>'+
+      '<div class="enh-btns"><button type="button" data-e="sharp">✨ توضيح</button><button type="button" data-e="ai">🤖 بالذكاء الاصطناعي</button><button type="button" data-e="undo">↩️ الأصل</button></div>'+
+      '<div class="enh-lv">القوة: <span data-lv="1">خفيف</span><span data-lv="2" class="on">متوسط</span><span data-lv="3">قوي</span></div>'+
+      '<div class="enh-st"></div>';
+    $('dmPaperBtn').addEventListener('click', function(){ var b=$('dmSheetBody'); if(b){ b.appendChild(box); syncTgt(); } });
+    var st=box.querySelector('.enh-st'), tgt=box.querySelector('#pcDEnhTgt'), level=2, busy=false, S={};
+    function msg(t, err){ st.textContent=t||''; st.classList.toggle('err', !!err); }
+    function info(sl){
+      var pair=sl.dataset.pair||'', side=sl.dataset.side||'front';
+      if(!pair){ var k=sl.dataset.tfkey||''; if(k.indexOf('dup:')===0){ pair=k.slice(4); side='back'; } else { var m=k.match(/^(.*)-(front|back)$/); if(m){ pair=m[1]; side=m[2]; } } }
+      return pair ? { pair:pair, side:side } : null;
+    }
+    function cur(){ return (typeof activeSlot!=='undefined' && activeSlot && activeSlot.isConnected) ? activeSlot : null; }
+    function targets(){
+      var a=cur(), out=[], seen={};
+      var list=a ? [a] : Array.prototype.slice.call(document.querySelectorAll('#pages-container .slot[data-tfkey]'));
+      list.forEach(function(sl){ var t=info(sl); if(!t) return; var k=t.pair+'|'+t.side; if(seen[k]) return; seen[k]=1; if(imageOfPair(t.pair, t.side)) out.push(t); });
+      return out;
+    }
+    function syncTgt(){ tgt.textContent=cur() ? '(المستمسك المحدد)' : '(كل المستمسكات)'; }
+    new MutationObserver(syncTgt).observe(document.body, { attributes:true, attributeFilter:['class'] }); syncTgt();
+    function stOf(t){
+      var k=t.pair+'|'+t.side, src=imageOfPair(t.pair, t.side), s=S[k];
+      if(!s || s.cur!==src) s=S[k]={ orig:src, ai:null, sharp:0, cur:src };   /* صورة جديدة أو أعيد قصها */
+      return s;
+    }
+    function rebuild(keys){
+      var act=cur(), key=act && act.dataset.tfkey;
+      var pu=document.getElementById('print-ui'); if(pu && getComputedStyle(pu).display!=='none') buildPrintPages();
+      if(key){ var n=null; try{ n=document.querySelector('#pages-container .slot[data-tfkey="'+CSS.escape(key)+'"]'); }catch(e){} if(n) setActiveSlot(n); }
+    }
+    function render(t, s){ var base=s.ai || s.orig;
+      return (s.sharp ? window.__AIX.sharpenSrc(base, s.sharp) : Promise.resolve(base)).then(function(src){ s.cur=src; setImageOfPair(t.pair, t.side, src); });
+    }
+    function setBusy(b){ busy=b; Array.prototype.forEach.call(box.querySelectorAll('button'), function(x){ x.disabled=b; }); }
+    function run(kind){
+      if(busy) return;
+      var ts=targets(); if(!ts.length){ msg('أضف مستمسك أولاً', true); return; }
+      setBusy(true);
+      var i=0, total=ts.length;
+      function step(){
+        if(i>=total){ rebuild(); setBusy(false);
+          msg(kind==='undo' ? '↩️ رجعت الصورة الأصلية' : kind==='ai' ? '🤖 تم التوضيح بالذكاء الاصطناعي ✅' : '✨ تم التوضيح ('+['','خفيف','متوسط','قوي'][level]+') ✅'); return Promise.resolve(); }
+        var t=ts[i++], s=stOf(t), pre=total>1 ? ' ('+i+' من '+total+')' : '';
+        var p;
+        if(kind==='undo'){ s.ai=null; s.sharp=0; p=render(t, s); }
+        else if(kind==='sharp'){ msg('✨ جارٍ التوضيح...'+pre); s.sharp=level; p=render(t, s); }
+        else{
+          if(s.ai){ p=Promise.resolve(); }
+          else{ msg('⏳ جارٍ تحميل أداة الذكاء الاصطناعي...'+pre);
+            p=window.__AIX.upscale(s.orig, function(v){ if(v>=0) msg('🤖 جارٍ التوضيح بالذكاء الاصطناعي... '+Math.round(v*100)+'%'+pre); })
+              .then(function(src){ s.ai=src; return render(t, s); }); }
+        }
+        return p.then(step);
+      }
+      step().catch(function(e){ console.error(e); rebuild(); setBusy(false);
+        msg(kind==='ai' ? 'تعذّر التوضيح بالذكاء الاصطناعي — تأكد من اتصال الإنترنت وأعد المحاولة' : 'تعذّر التوضيح', true); });
+    }
+    box.addEventListener('click', function(e){
+      var b=e.target.closest('[data-e]'); if(b){ run(b.getAttribute('data-e')); return; }
+      var l=e.target.closest('[data-lv]'); if(l && !busy){ level=+l.getAttribute('data-lv');
+        Array.prototype.forEach.call(box.querySelectorAll('[data-lv]'), function(x){ x.classList.toggle('on', x===l); }); }
+    });
+  })();
+
   /* ---- المستمسكات: إضافة بلا حدّ لكل نوع ---- */
   function firstFree(typeKey){
     var arr=cardData[typeKey];
@@ -9843,6 +9914,7 @@ document.addEventListener('DOMContentLoaded', function(){
 
   async function rebuildComposite(){
     if(!originalImageSrc) return;
+    pmEnhCheck(); /* توضيح الصورة: صورة جديدة => الضبط يرجع للأصل */
     const token = ++rebuildToken;
     const needsMask = selectedBg !== 'original';
     if(needsMask && !segMaskCanvas){
@@ -9865,17 +9937,21 @@ document.addEventListener('DOMContentLoaded', function(){
       workCanvas.height = img.naturalHeight;
       const ctx = workCanvas.getContext('2d');
       ctx.clearRect(0, 0, workCanvas.width, workCanvas.height);
+      ctx.filter = pmToneFilter(); /* السطوع/التباين/الألوان على الشخص فقط */
       if(!needsMask){
         ctx.drawImage(img, 0, 0, workCanvas.width, workCanvas.height);
+        ctx.filter = 'none';
       }else{
         // الشخص فقط (بقناع مُنقّى وحواف بلا هالة) ثم اللون المختار خلفه — الصورة الأصلية نفسها لا تُعدَّل
         ctx.drawImage(mask, 0, 0, workCanvas.width, workCanvas.height);
+        ctx.filter = 'none';
         ctx.globalCompositeOperation = 'destination-over';
         ctx.fillStyle = selectedBg;
         ctx.fillRect(0, 0, workCanvas.width, workCanvas.height);
         ctx.globalCompositeOperation = 'source-over';
       }
 
+      if(pmEnh.sharp && window.__AIX) window.__AIX.sharpenCanvas(workCanvas, pmEnh.sharp); /* ✨ توضيح */
       compositeImageSrc = workCanvas.toDataURL('image/png');
       finalizePreviewUpdate();
       if(needsMask){ statusMsg.textContent = ''; statusMsg.className = 'status-msg'; }
@@ -9908,6 +9984,90 @@ document.addEventListener('DOMContentLoaded', function(){
     updateCropAspect();
     applyCropTransform();
   }
+
+  /* =========================================================
+     الصور الشخصية: السطوع/التباين/الألوان + «🔍 دقة الصورة» (إضافة معزولة)
+     - السطوع/التباين/الألوان تحت «الخلفية» — تُطبَّق على الشخص فقط (لون الخلفية يبقى كما هو)
+     - «✨ توضيح» و«🤖 بالذكاء الاصطناعي» و«↩️ الأصل» تحت «عدد النسخ في الورقة»
+     ========================================================= */
+  const pmEnh = { b: 100, c: 100, s: 100, sharp: 0, level: 2, aiFrom: null, aiSrc: null, lastSrc: null, busy: false };
+  function pmToneFilter(){ return 'brightness(' + pmEnh.b + '%) contrast(' + pmEnh.c + '%) saturate(' + pmEnh.s + '%)'; }
+  function pmEnhCheck(){
+    if(originalImageSrc !== pmEnh.lastSrc && originalImageSrc !== pmEnh.aiSrc){   /* صورة جديدة: كل الضبط يرجع للأصل */
+      pmEnh.b = pmEnh.c = pmEnh.s = 100; pmEnh.sharp = 0; pmEnh.aiFrom = pmEnh.aiSrc = null; pmEnhUI(); pmEnhMsg('');
+    }
+    pmEnh.lastSrc = originalImageSrc;
+  }
+  const pmToneBox = document.createElement('div');
+  pmToneBox.id = 'pmTone'; pmToneBox.className = 'enh-tone';
+  pmToneBox.innerHTML = [['b', '☀️ السطوع'], ['c', '◐ التباين'], ['s', '🎨 الألوان']].map(function(r){
+    return '<label class="enh-sl"><span>' + r[1] + '</span><input type="range" min="50" max="150" step="1" value="100" data-k="' + r[0] + '"><b>100%</b></label>';
+  }).join('') + '<button type="button" class="enh-mini" id="pmToneReset">↺ إعادة الألوان</button>';
+  manualEditBtn.parentNode.appendChild(pmToneBox);
+  const pmEnhBox = document.createElement('div');
+  pmEnhBox.id = 'pmEnh'; pmEnhBox.className = 'enh-box';
+  pmEnhBox.innerHTML = '<div class="enh-title">🔍 دقة الصورة</div>' +
+    '<div class="enh-btns"><button type="button" data-e="sharp">✨ توضيح</button><button type="button" data-e="ai">🤖 بالذكاء الاصطناعي</button><button type="button" data-e="undo">↩️ الأصل</button></div>' +
+    '<div class="enh-lv">القوة: <span data-lv="1">خفيف</span><span data-lv="2" class="on">متوسط</span><span data-lv="3">قوي</span></div>' +
+    '<div class="enh-st"></div>';
+  pmToneBox.parentNode.insertBefore(pmEnhBox, pmToneBox.nextSibling); /* تحت أزرار الخلفية والألوان (الصورة أمامك) */
+  function pmEnhMsg(t, err){ const e = pmEnhBox.querySelector('.enh-st'); e.textContent = t || ''; e.classList.toggle('err', !!err); }
+  function pmEnhUI(){
+    pmToneBox.querySelectorAll('input[data-k]').forEach(function(inp){ inp.value = pmEnh[inp.dataset.k]; inp.nextElementSibling.textContent = pmEnh[inp.dataset.k] + '%'; });
+    pmEnhBox.querySelector('[data-e="sharp"]').classList.toggle('on', pmEnh.sharp > 0);
+    pmEnhBox.querySelector('[data-e="ai"]').classList.toggle('on', !!pmEnh.aiSrc && originalImageSrc === pmEnh.aiSrc);
+  }
+  function pmEnhRefresh(){
+    const hadSheet = !printBtn.disabled;   /* إذا كانت الورقة مرتّبة: تُرتَّب من جديد بالصورة الجديدة */
+    cropImg.style.filter = ''; previewImg.style.filter = '';
+    return rebuildComposite().then(function(){ pmEnhUI(); if(hadSheet && !generateBtn.disabled) generateBtn.click(); });
+  }
+  pmToneBox.addEventListener('input', function(e){
+    const inp = e.target.closest('input[data-k]'); if(!inp) return;
+    pmEnh[inp.dataset.k] = +inp.value; inp.nextElementSibling.textContent = inp.value + '%';
+    cropImg.style.filter = pmToneFilter(); previewImg.style.filter = pmToneFilter();   /* معاينة فورية أثناء السحب */
+  });
+  pmToneBox.addEventListener('change', function(e){ if(e.target.closest('input[data-k]') && originalImageSrc) pmEnhRefresh(); });
+  document.getElementById('pmToneReset').addEventListener('click', function(){
+    pmEnh.b = pmEnh.c = pmEnh.s = 100; pmEnhUI(); if(originalImageSrc) pmEnhRefresh();
+  });
+  pmEnhBox.addEventListener('click', function(e){
+    const l = e.target.closest('[data-lv]');
+    if(l && !pmEnh.busy){
+      pmEnh.level = +l.dataset.lv;
+      pmEnhBox.querySelectorAll('[data-lv]').forEach(function(x){ x.classList.toggle('on', x === l); });
+      if(pmEnh.sharp > 0 && originalImageSrc){ pmEnh.sharp = pmEnh.level; pmEnhRefresh().then(function(){ pmEnhMsg('✨ تم التوضيح (' + l.textContent + ') ✅'); }); }
+      return;
+    }
+    const b = e.target.closest('[data-e]'); if(!b || pmEnh.busy) return;
+    if(!originalImageSrc){ pmEnhMsg('ارفع صورة أولاً', true); return; }
+    const kind = b.dataset.e, btns = pmEnhBox.querySelectorAll('button');
+    function busy(v){ pmEnh.busy = v; btns.forEach(function(x){ x.disabled = v; }); }
+    if(kind === 'sharp'){
+      busy(true); pmEnhMsg('✨ جارٍ التوضيح...');
+      pmEnh.sharp = pmEnh.level;
+      pmEnhRefresh().then(function(){ busy(false); pmEnhMsg('✨ تم التوضيح (' + ['', 'خفيف', 'متوسط', 'قوي'][pmEnh.level] + ') ✅'); });
+    }else if(kind === 'undo'){
+      busy(true);
+      if(pmEnh.aiFrom){ originalImageSrc = pmEnh.aiFrom; segMaskCanvas = null; segMaskAuto = null; }
+      pmEnh.aiFrom = pmEnh.aiSrc = null; pmEnh.lastSrc = originalImageSrc;
+      pmEnh.sharp = 0; pmEnh.b = pmEnh.c = pmEnh.s = 100;
+      pmEnhRefresh().then(function(){ busy(false); pmEnhMsg('↩️ رجعت الصورة الأصلية'); });
+    }else if(kind === 'ai'){
+      if(pmEnh.aiSrc && originalImageSrc === pmEnh.aiSrc){ pmEnhMsg('🤖 الصورة موضّحة بالذكاء الاصطناعي مسبقاً'); return; }
+      if(!window.__AIX){ pmEnhMsg('تعذّر التوضيح', true); return; }
+      const from = originalImageSrc;
+      busy(true); pmEnhMsg('⏳ جارٍ تحميل أداة الذكاء الاصطناعي... (أول مرة تحتاج إنترنت)');
+      window.__AIX.upscale(from, function(v){ if(v >= 0) pmEnhMsg('🤖 جارٍ التوضيح بالذكاء الاصطناعي... ' + Math.round(v * 100) + '%'); })
+        .then(function(src){
+          if(originalImageSrc !== from){ busy(false); pmEnhMsg(''); return; }   /* تغيّرت الصورة أثناء المعالجة */
+          pmEnh.aiFrom = from; pmEnh.aiSrc = src; pmEnh.lastSrc = src;
+          originalImageSrc = src; segMaskCanvas = null; segMaskAuto = null;
+          return pmEnhRefresh().then(function(){ busy(false); pmEnhMsg('🤖 تم التوضيح بالذكاء الاصطناعي ✅'); });
+        })
+        .catch(function(err){ console.error(err); busy(false); pmEnhMsg('تعذّر التوضيح بالذكاء الاصطناعي — تأكد من اتصال الإنترنت وأعد المحاولة', true); });
+    }
+  });
 
   /* ---------- لون الفراغ داخل الإطار عند سحب الصورة (يطابق لون الخلفية المختار) ---------- */
   function frameBgColor(){
@@ -98945,6 +99105,144 @@ const pdfjsBuild = 'ce8716743';
 })();
 </script>
 
+<style id="pc-enh-style">
+  /* «🔍 دقة الصورة» + السطوع/التباين/الألوان (الصور الشخصية والمستمسكات) */
+  .enh-box{ margin-top:10px; padding:10px 12px; border:1.5px solid #d6e4f7; border-radius:14px; background:#f6faff; text-align:right; }
+  .enh-title{ font-size:13.5px; font-weight:900; color:#0b3d7a; margin-bottom:8px; }
+  .enh-title small{ font-size:11.5px; font-weight:700; color:#5b7393; }
+  .enh-btns{ display:grid; grid-template-columns:1fr 1.45fr 1fr; gap:6px; }
+  .enh-btns button{ border:none; border-radius:11px; padding:9px 6px; font-family:'Cairo',sans-serif; font-size:13px; font-weight:800; cursor:pointer; color:#fff; background:linear-gradient(135deg,#2f7ed8,#0b5cc4); box-shadow:0 3px 8px rgba(11,92,196,.22); }
+  .enh-btns button[data-e="ai"]{ background:linear-gradient(135deg,#7b4ee0,#5a2fc2); }
+  .enh-btns button[data-e="undo"]{ background:linear-gradient(135deg,#6b7a90,#4a5568); }
+  .enh-btns button.on{ outline:3px solid #ffd54a; outline-offset:1px; }
+  .enh-btns button:disabled{ opacity:.55; cursor:wait; }
+  .enh-lv{ margin-top:8px; font-size:12.5px; font-weight:800; color:#33475f; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .enh-lv span{ padding:4px 11px; border-radius:999px; border:1.5px solid #cfe0f7; background:#fff; color:#0b5cc4; cursor:pointer; }
+  .enh-lv span.on{ background:#0b5cc4; color:#fff; border-color:transparent; }
+  .enh-st{ margin-top:6px; font-size:12.5px; font-weight:800; color:#0a7a3e; min-height:1em; }
+  .enh-st.err{ color:#c62828; }
+  .enh-tone{ margin-top:10px; display:flex; flex-direction:column; gap:6px; }
+  .enh-sl{ display:grid; grid-template-columns:92px 1fr 46px; align-items:center; gap:8px; font-size:13px; font-weight:800; color:#1e3a5f; }
+  .enh-sl input{ width:100%; accent-color:#0b5cc4; }
+  .enh-sl b{ font-size:12px; color:#0b5cc4; text-align:left; direction:ltr; }
+  .enh-mini{ align-self:flex-start; border:1.5px solid #cfe0f7; background:#fff; color:#33475f; border-radius:10px; padding:5px 12px; font-family:'Cairo',sans-serif; font-size:12px; font-weight:800; cursor:pointer; }
+  .pc-enh-row{ display:none !important; }
+  body.dm #print-ui .pc-panel .toolbar-toggles > .toolbar-duplex.pc-enh-row{ display:block !important; padding:0 !important; background:none !important; box-shadow:none !important; border:none !important; }
+  body.dm #print-ui .pc-panel .pc-enh-row .enh-box{ margin-top:0; }
+  body.dark-mode .enh-box{ background:#18233a; border-color:#2c3c5a; }
+  body.dark-mode .enh-title{ color:#cfe0ff; } body.dark-mode .enh-sl{ color:#dbe6ff; }
+  body.dark-mode .enh-lv{ color:#b9c8e6; } body.dark-mode .enh-lv span:not(.on), body.dark-mode .enh-mini{ background:#1f2a44; border-color:#334259; color:#9fc7ff; }
+  body.dark-mode .enh-st{ color:#5fe39a; } body.dark-mode .enh-st.err{ color:#ff8a8a; }
+</style>
+<script id="pc-aix">
+/* =========================================================
+   «توضيح الصورة» — أدوات مشتركة (إضافة معزولة)
+   - sharpen: توضيح عادي (Unsharp Mask) بدون إنترنت
+   - upscale: توضيح بالذكاء الاصطناعي (ESRGAN عبر UpscalerJS) — تُحمَّل الأداة من الإنترنت عند أول استخدام فقط
+   ========================================================= */
+(function(){
+  /* قوة التوضيح: خفيف / متوسط / قوي — [حواف رفيعة، حواف واسعة] (الواسعة تفيد الصور المغوشة) */
+  var AMT = [[0, 0], [0.45, 0.25], [0.9, 0.8], [1.3, 1.5]];
+  function loadImg(src){ return new Promise(function(res, rej){ var im = new Image(); im.onload = function(){ res(im); }; im.onerror = rej; im.src = src; }); }
+  /* تمويه صندوقي سريع بنصف قطر r (يُكرَّر مرتين = قريب من غاوسي) — قناة واحدة */
+  function boxBlur(src, w, h, r, out){
+    var tmp = new Float32Array(w * h), x, y, s, i, row, a, b, len = 2 * r + 1;
+    for(y = 0; y < h; y++){ row = y * w; s = 0;
+      for(x = -r; x <= r; x++) s += src[row + (x < 0 ? 0 : x >= w ? w - 1 : x)];
+      for(x = 0; x < w; x++){ tmp[row + x] = s / len; a = x + r + 1; b = x - r; s += src[row + (a >= w ? w - 1 : a)] - src[row + (b < 0 ? 0 : b)]; } }
+    for(x = 0; x < w; x++){ s = 0;
+      for(y = -r; y <= r; y++) s += tmp[(y < 0 ? 0 : y >= h ? h - 1 : y) * w + x];
+      for(y = 0; y < h; y++){ out[y * w + x] = s / len; a = y + r + 1; b = y - r; s += tmp[(a >= h ? h - 1 : a) * w + x] - tmp[(b < 0 ? 0 : b) * w + x]; } }
+    return out;
+  }
+  function sharpenCanvas(c, level){
+    var A = AMT[level]; if(!A || (!A[0] && !A[1])) return c;
+    var w = c.width, h = c.height, ctx = c.getContext('2d'), id = ctx.getImageData(0, 0, w, h), d = id.data, n = w * h, i, k;
+    var R2 = Math.max(2, Math.round(Math.max(w, h) / 300));   /* نصف قطر الحواف الواسعة حسب حجم الصورة */
+    var ch = new Float32Array(n), b1 = new Float32Array(n), b2 = new Float32Array(n), t = new Float32Array(n);
+    for(k = 0; k < 3; k++){
+      for(i = 0; i < n; i++) ch[i] = d[i * 4 + k];
+      boxBlur(boxBlur(ch, w, h, 1, t), w, h, 1, b1);
+      boxBlur(boxBlur(ch, w, h, R2, t), w, h, R2, b2);
+      for(i = 0; i < n; i++){
+        var o = ch[i], f = o - b1[i], g = b1[i] - b2[i];
+        if(f > -2 && f < 2) f = 0;   /* تجاهل التشويش الصغير */
+        var v = o + A[0] * f + A[1] * g;
+        d[i * 4 + k] = v < 0 ? 0 : v > 255 ? 255 : v;
+      }
+    }
+    ctx.putImageData(id, 0, 0); return c;
+  }
+  function sharpenSrc(src, level){
+    return loadImg(src).then(function(im){
+      var c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight;
+      c.getContext('2d').drawImage(im, 0, 0); sharpenCanvas(c, level);
+      return c.toDataURL(/^data:image\/png/.test(src) ? 'image/png' : 'image/jpeg', 0.95);
+    });
+  }
+  /* تحميل أداة الذكاء الاصطناعي (مرة واحدة) — عدة روابط احتياطية لكل ملف */
+  var LIBS = [
+    { test: function(){ return !!window.tf; }, urls: ['https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0/dist/tf.min.js', 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4/dist/tf.min.js'] },
+    { test: function(){ return !!window.ESRGANSlim2x; }, urls: ['https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-slim@1.0.0/dist/umd/2x.min.js', 'https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-slim@1.0.0-beta.19/dist/umd/2x.min.js', 'https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-slim@latest/dist/umd/2x.min.js'] },
+    { test: function(){ return !!window.Upscaler; }, urls: ['https://cdn.jsdelivr.net/npm/upscaler@1.0.0/dist/browser/umd/upscaler.min.js', 'https://cdn.jsdelivr.net/npm/upscaler@1.0.0-beta.19/dist/browser/umd/upscaler.min.js', 'https://cdn.jsdelivr.net/npm/upscaler@latest/dist/browser/umd/upscaler.min.js'] }
+  ];
+  function loadScript(url){ return new Promise(function(res, rej){ var s = document.createElement('script'); s.src = url; s.crossOrigin = 'anonymous'; s.onload = res; s.onerror = function(){ s.remove(); rej(); }; document.head.appendChild(s); }); }
+  function loadOne(lib){
+    if(lib.test()) return Promise.resolve();
+    var i = 0;
+    return (function next(){ if(i >= lib.urls.length) return Promise.reject(new Error('load')); return loadScript(lib.urls[i++]).then(function(){ if(!lib.test()) return next(); }, next); })();
+  }
+  var loading = null, upscaler = null;
+  function loadAI(){
+    if(upscaler) return Promise.resolve(upscaler);
+    if(!loading) loading = LIBS.reduce(function(p, lib){ return p.then(function(){ return loadOne(lib); }); }, Promise.resolve())
+      .then(function(){ upscaler = new window.Upscaler({ model: window.ESRGANSlim2x }); return upscaler; })
+      .catch(function(e){ loading = null; throw e; });
+    return loading;
+  }
+  var MAX_IN = 900;   /* الصورة تُصغَّر لهذا الحد قبل الذكاء الاصطناعي (الناتج ضعفه) حتى لا يتعب الحاسوب */
+  /* التقسيم لقطع يتم هنا (بدل تقسيم الأداة الداخلي الذي كان يترك مربعات سوداء على حافة الصورة):
+     كل قطعة تُوضَّح كاملة مع هامش تداخل، ثم يُلصق وسطها فقط في مكانه — فلا تظهر حدود ولا مربعات */
+  var TILE = 160, OVL = 16;
+  function upscale(src, onProgress){
+    var im0;
+    return loadImg(src).then(function(im){ im0 = im; if(onProgress) onProgress(-1); return loadAI(); }).then(function(up){
+      var w = im0.naturalWidth, h = im0.naturalHeight, k = Math.min(1, MAX_IN / Math.max(w, h));
+      var c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+      var cx = c.getContext('2d'); cx.imageSmoothingQuality = 'high'; cx.drawImage(im0, 0, 0, c.width, c.height);
+      var W = c.width, H = c.height, tiles = [], ty, tx;
+      for(ty = 0; ty < H; ty += TILE) for(tx = 0; tx < W; tx += TILE) tiles.push({ x: tx, y: ty, w: Math.min(TILE, W - tx), h: Math.min(TILE, H - ty) });
+      var out = null, ox = null, S = 0, i = 0;
+      function next(){
+        if(i >= tiles.length) return Promise.resolve(out);
+        var t = tiles[i++];
+        var ex0 = Math.max(0, t.x - OVL), ey0 = Math.max(0, t.y - OVL), ex1 = Math.min(W, t.x + t.w + OVL), ey1 = Math.min(H, t.y + t.h + OVL);
+        var tc = document.createElement('canvas'); tc.width = ex1 - ex0; tc.height = ey1 - ey0;
+        tc.getContext('2d').drawImage(c, ex0, ey0, tc.width, tc.height, 0, 0, tc.width, tc.height);
+        return up.upscale(tc, { output: 'base64' }).then(function(b64){
+          if(typeof b64 !== 'string') throw new Error('out');
+          return loadImg(/^data:/.test(b64) ? b64 : 'data:image/png;base64,' + b64);
+        }).then(function(ti){
+          var sx = ti.naturalWidth / tc.width, sy = ti.naturalHeight / tc.height;
+          if(!out){ S = sx; out = document.createElement('canvas'); out.width = Math.round(W * sx); out.height = Math.round(H * sy); ox = out.getContext('2d'); }
+          var dx = Math.round(t.x * sx), dy = Math.round(t.y * sy), dw = Math.round((t.x + t.w) * sx) - dx, dh = Math.round((t.y + t.h) * sy) - dy;
+          ox.drawImage(ti, Math.round((t.x - ex0) * sx), Math.round((t.y - ey0) * sy), dw, dh, dx, dy, dw, dh);
+          if(onProgress) onProgress(i / tiles.length);
+          return new Promise(function(r){ setTimeout(r, 0); }).then(next);   /* يترك الشاشة تتحدث بين القطع */
+        });
+      }
+      return next();
+    }).then(function(oc){
+      if(!oc) throw new Error('out');
+      if(/^data:image\/png/.test(src)) return oc.toDataURL('image/png');
+      var c = document.createElement('canvas'); c.width = oc.width; c.height = oc.height;   /* حفظ كـ JPEG عالي الجودة (أخف من PNG) */
+      var cx = c.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, c.width, c.height); cx.drawImage(oc, 0, 0);
+      return c.toDataURL('image/jpeg', 0.95);
+    });
+  }
+  window.__AIX = { sharpenCanvas: sharpenCanvas, sharpenSrc: sharpenSrc, upscale: upscale, loadAI: loadAI };
+})();
+</script>
 <script id="pwa-sw">if('serviceWorker' in navigator && location.protocol==='https:'){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
 </body>
 </html>
