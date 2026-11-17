@@ -7483,6 +7483,31 @@ document.addEventListener('DOMContentLoaded', function(){
         /* ينسخ نفس الموضع والتكبير إلى الصورة المقابلة (الوجه أو الظهر) عند تفعيل الربط */
         function syncLinkedTf(key) {
             if (!linkMoveOn) return;
+            /* وضع «وجه/ظهر منفصلين»: الظهر بالورقة الثانية يتحرك بشكل معكوس (مثل قلب الورقة) حتى يُطبع خلف الوجه بالضبط */
+            if (duplexMode && key && key.indexOf('dup:') !== 0) {
+                const inf = pairInfoFromTfKey(key);
+                if (inf && inf.side === 'front') {
+                    const fEl = document.querySelector('.slot[data-tfkey="' + key + '"]');
+                    const bEl = document.querySelector('.slot[data-tfkey="dup:' + inf.pair + '"]');
+                    if (fEl && bEl) {
+                        const fItem = { tfkey: key, x: parseFloat(fEl.style.left) || 0, y: parseFloat(fEl.style.top) || 0,
+                                        w: parseFloat(fEl.dataset.basew) || 0, h: parseFloat(fEl.dataset.baseh) || 0 };
+                        const mr = mirrorRect(finalRectMM(fItem), flipMode);
+                        const nx = mr.x + backOffset.x, ny = mr.y + backOffset.y;
+                        bEl.style.left = nx.toFixed(3) + 'mm'; bEl.style.top = ny.toFixed(3) + 'mm';
+                        bEl.style.width = mr.w.toFixed(3) + 'mm'; bEl.style.height = mr.h.toFixed(3) + 'mm';
+                        bEl.dataset.basew = mr.w; bEl.dataset.baseh = mr.h;
+                        const pg = bEl.closest('.dynamic-page');
+                        if (pg && pg.layoutItems) pg.layoutItems.forEach(it => { if (it.tfkey === 'dup:' + inf.pair) { it.x = nx; it.y = ny; it.w = mr.w; it.h = mr.h; } });
+                        const dt = tfOf('dup:' + inf.pair), ft = tfOf(key);
+                        dt.r = (360 - (ft.r || 0)) % 360;
+                        applyTfTo(bEl);
+                        if (typeof syncHandleGeometry === 'function') { try { syncHandleGeometry(bEl); } catch (e) {} }
+                    }
+                    return;
+                }
+            }
+            if (duplexMode && key && key.indexOf('dup:') === 0) return; /* تحريك الظهر نفسه = ضبط دقيق للظهر فقط */
             const ck = counterpartTfKey(key);
             if (!ck) return;
             const src = tfOf(key);
