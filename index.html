@@ -4524,15 +4524,18 @@ function NORM(s){return String(s||'').toUpperCase().replace(/[^0-9A-Z]/g,'').rep
 var LS=null;try{LS=window.localStorage;}catch(e){}
 function g(k){try{return LS?LS.getItem(k):null;}catch(e){return null;}}
 function st(k,v){try{if(LS)LS.setItem(k,v);}catch(e){}}
+function IDB(cb){try{var q=window.indexedDB.open('psa',1);q.onupgradeneeded=function(){try{q.result.createObjectStore('kv');}catch(e){}};q.onsuccess=function(){cb(q.result);};q.onerror=function(){cb(null);};}catch(e){cb(null);}}
+function iput(o){IDB(function(db){if(!db)return;try{var t=db.transaction('kv','readwrite'),s=t.objectStore('kv');for(var k in o)s.put(o[k],k);t.oncomplete=t.onerror=function(){try{db.close();}catch(e){}};}catch(e){}});}
+function iget(cb){IDB(function(db){if(!db)return cb({});try{var t=db.transaction('kv','readonly'),s=t.objectStore('kv'),r={},a=s.get('dev'),b=s.get('key');a.onsuccess=function(){r.dev=a.result;};b.onsuccess=function(){r.key=b.result;};t.oncomplete=function(){try{db.close();}catch(e){}cb(r);};t.onerror=function(){cb({});};}catch(e){cb({});}});}
 var dev=g('psa_dev');
 if(!dev||!/^[2-9A-HJ-NP-Z]{8}$/.test(dev)){dev='';var r=new Uint8Array(8);try{(window.crypto||window.msCrypto).getRandomValues(r);}catch(e){for(var z=0;z<8;z++)r[z]=Math.floor(Math.random()*256);}for(var i=0;i<8;i++)dev+=AL[r[i]%32];st('psa_dev',dev);}
 var devF=dev.slice(0,4)+'-'+dev.slice(4);
 function ok(c){return !!c&&NORM(c)===NORM(CODE(dev));}
-if(ok(g('psa_key')))return;
+if(ok(g('psa_key'))){iput({dev:dev,key:CODE(dev)});return;}
 var root=document.documentElement;root.classList.add('psa-locked');
 window.addEventListener('keydown',function(e){if(!root.classList.contains('psa-locked'))return;var t=e.target;if(t&&t.closest&&t.closest('#psaLock'))return;e.stopImmediatePropagation();e.preventDefault();},true);
 function build(){
-  if(document.getElementById('psaLock'))return;
+  if(document.getElementById('psaLock')||!root.classList.contains('psa-locked'))return;
   var waTxt='مرحبا، أريد كود تفعيل تطبيق صور المعاملات. رمز جهازي: '+devF;
   var d=document.createElement('div');d.id='psaLock';d.setAttribute('dir','rtl');
   d.innerHTML='<div class="psa-card"><div class="psa-ic">🔐</div><h2>تفعيل التطبيق</h2>'+
@@ -4549,13 +4552,21 @@ function build(){
     fb();function fb(){try{var t=document.createElement('textarea');t.value=devF;t.style.position='fixed';t.style.opacity='0';d.appendChild(t);t.select();document.execCommand('copy');t.remove();done();}catch(e){}}
   });
   function go(){
-    if(ok(inp.value)){st('psa_key',CODE(dev));root.classList.remove('psa-locked');d.remove();try{window.dispatchEvent(new Event('resize'));}catch(e){}}
+    if(ok(inp.value)){st('psa_key',CODE(dev));iput({dev:dev,key:CODE(dev)});root.classList.remove('psa-locked');d.remove();try{window.dispatchEvent(new Event('resize'));}catch(e){}}
     else{msg.className='err';msg.textContent=NORM(inp.value)?'الكود غير صحيح، تأكد منه وأعد المحاولة':'اكتب كود التفعيل أولاً';}
   }
   document.getElementById('psaGo').addEventListener('click',go);
   inp.addEventListener('keydown',function(e){if(e.key==='Enter')go();});
 }
 if(document.body)build();else document.addEventListener('DOMContentLoaded',build);
+function unlock(){root.classList.remove('psa-locked');var d=document.getElementById('psaLock');if(d)d.remove();try{window.dispatchEvent(new Event('resize'));}catch(e){}}
+iget(function(r){
+  if(!root.classList.contains('psa-locked'))return;
+  if(r&&r.dev&&/^[2-9A-HJ-NP-Z]{8}$/.test(r.dev)&&r.dev!==dev){dev=r.dev;devF=dev.slice(0,4)+'-'+dev.slice(4);st('psa_dev',dev);
+    var e=document.getElementById('psaDev');if(e)e.textContent=devF;
+    var w=document.getElementById('psaWa');if(w)w.href='https://wa.me/9647831161164?text='+encodeURIComponent('مرحبا، أريد كود تفعيل تطبيق صور المعاملات. رمز جهازي: '+devF);}
+  if(r&&ok(r.key)){st('psa_key',CODE(dev));unlock();}else iput({dev:dev});
+});
 })();</script>
 </head>
 <body>
@@ -99342,5 +99353,146 @@ const pdfjsBuild = 'ce8716743';
 })();
 </script>
 <script id="pwa-sw">if('serviceWorker' in navigator && location.protocol==='https:'){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
+<style id="jpg-save-style">
+/* حفظ JPG — زر إضافي بجانب «حفظ PDF» (الصور الشخصية) وبجانب «طباعة» (المستمسكات) */
+#pmJpgTop{display:none;}
+@media screen and (min-width:0px){
+  #photo-app.pm #pmJpgTop{display:block; border:1.5px solid #0b5cc4; background:#fff; color:#0b5cc4; border-radius:11px; padding:4px 7px; font-family:inherit; font-size:12px; font-weight:800; cursor:pointer; white-space:nowrap;}
+  #photo-app.pm #pmJpgTop:disabled{opacity:.5; cursor:not-allowed;}
+  body.dark-mode #photo-app.pm #pmJpgTop{background:#0e1420; color:#58b6ff; border-color:#2f7ed8;}
+}
+#dmBar #dmJpgBtn{white-space:nowrap;}
+/* الشاشات الضيقة: الزر يكون بسطر شريط معلومات الورقة (يمين) حتى لا يزحم أزرار الأعلى */
+#photo-app .preview-area-header.has-jpg{position:relative;}
+#photo-app .preview-area-header #pmJpgTop{position:absolute; right:0; top:50%; transform:translateY(-50%); padding:4px 6px; font-size:11.5px;}
+</style>
+<script id="jpg-save">
+(function(){
+  /* بديل لمكتبة PDF يرسم نفس العناصر على صورة بدل ملف PDF (نفس المواضع والمقاسات بالمليمتر) */
+  function JpgDoc(opt){
+    var f=(opt&&opt.format)||[210,297];
+    this.W=f[0]; this.H=f[1];
+    this.pages=[[]]; this.cur=0; this.st={col:'#000', lw:0.2, dash:[]};
+  }
+  JpgDoc.prototype={
+    _op:function(o){ o.st={col:this.st.col, lw:this.st.lw, dash:this.st.dash.slice()}; this.pages[this.cur].push(o); },
+    addPage:function(){ this.pages.push([]); this.cur=this.pages.length-1; return this; },
+    setPage:function(n){ this.cur=Math.max(0,Math.min(this.pages.length-1,n-1)); return this; },
+    setDrawColor:function(r,g,b){ if(g===undefined){ g=r; b=r; } this.st.col='rgb('+r+','+g+','+b+')'; return this; },
+    setLineWidth:function(w){ this.st.lw=w; return this; },
+    setLineDashPattern:function(a){ this.st.dash=(a||[]).slice(); return this; },
+    addImage:function(src,fmt,x,y,w,h){ this._op({t:'img', src:src, x:x, y:y, w:w, h:h}); return this; },
+    rect:function(x,y,w,h){ this._op({t:'rect', x:x, y:y, w:w, h:h}); return this; },
+    line:function(x1,y1,x2,y2){ this._op({t:'line', x1:x1, y1:y1, x2:x2, y2:y2}); return this; },
+    save:function(name){ return this.render(String(name||'صورة').replace(/\.pdf$/i,'')); },
+    render:function(base){
+      var self=this, W=this.W, H=this.H;
+      var k=Math.min(300/25.4, Math.sqrt(16000000/(W*H)));   /* 300 نقطة/إنش، وبحد أقصى آمن للهواتف */
+      function load(src){ return new Promise(function(res){ var im=new Image(); im.onload=function(){res(im);}; im.onerror=function(){res(null);}; im.src=src; }); }
+      function one(ops){
+        var c=document.createElement('canvas'); c.width=Math.round(W*k); c.height=Math.round(H*k);
+        var x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height);
+        x.imageSmoothingEnabled=true; x.imageSmoothingQuality='high';
+        var p=Promise.resolve();
+        ops.forEach(function(o){ p=p.then(function(){
+          if(o.t==='img') return load(o.src).then(function(im){ if(im) x.drawImage(im, o.x*k, o.y*k, o.w*k, o.h*k); });
+          x.strokeStyle=o.st.col; x.lineWidth=Math.max(1,o.st.lw*k); x.setLineDash(o.st.dash.map(function(d){return d*k;}));
+          x.beginPath();
+          if(o.t==='rect') x.rect(o.x*k, o.y*k, o.w*k, o.h*k); else { x.moveTo(o.x1*k, o.y1*k); x.lineTo(o.x2*k, o.y2*k); }
+          x.stroke();
+        }); });
+        return p.then(function(){ return new Promise(function(res){
+          if(c.toBlob) c.toBlob(function(b){ res(b); }, 'image/jpeg', 0.95); else res(null);
+        }).then(function(b){ return b || dataBlob(c.toDataURL('image/jpeg', 0.95)); }); });
+      }
+      var list=this.pages, n=list.length, chain=Promise.resolve();
+      list.forEach(function(ops, i){ chain=chain.then(function(){ return one(ops); }).then(function(b){
+        return download(b, base + (n>1 ? ' - ' + (i+1) : '') + '.jpg');
+      }); });
+      return chain;
+    }
+  };
+  function dataBlob(u){ var a=u.split(','), s=atob(a[1]), b=new Uint8Array(s.length); for(var i=0;i<s.length;i++) b[i]=s.charCodeAt(i); return new Blob([b], {type:'image/jpeg'}); }
+  function download(blob, name){
+    return new Promise(function(res){
+      var u=URL.createObjectURL(blob), a=document.createElement('a');
+      a.href=u; a.download=name; a.style.display='none'; document.body.appendChild(a); a.click();
+      setTimeout(function(){ a.remove(); URL.revokeObjectURL(u); res(); }, 700);
+    });
+  }
+  window.__JpgDoc=JpgDoc;
+
+  function busy(btn, on, txt){ if(on){ btn.dataset.t=btn.textContent; btn.textContent='⏳ جارِ التجهيز...'; btn.disabled=true; } else { btn.textContent=btn.dataset.t||txt; btn.disabled=false; } }
+
+  /* ---------- الصور الشخصية: نفس رسم «حفظ PDF» لكن الناتج صورة JPG ---------- */
+  function photoJpg(btn){
+    var orig=document.getElementById('savePhotoPdfBtn');
+    if(!orig || orig.disabled) return;
+    var real=window.jspdf, done=false, hold=null;
+    function Fake(o){ var d=new JpgDoc(o); var s=d.save; d.save=function(nm){ hold=s.call(d, nm); return d; }; return d; }
+    busy(btn, true);
+    window.jspdf={ jsPDF: Fake };
+    try{ orig.click(); } finally { window.jspdf=real; }
+    /* ينتظر انتهاء التجهيز (زر PDF الأصلي يرجع لحالته) ثم ينتظر حفظ الصور */
+    var t0=Date.now();
+    (function wait(){
+      if(orig.disabled && Date.now()-t0<120000){ setTimeout(wait, 150); return; }
+      Promise.resolve(hold).catch(function(e){ console.error(e); alert('تعذّر حفظ الصورة.'); }).then(function(){ busy(btn, false, btn.parentNode && btn.parentNode.classList.contains('preview-area-header') ? '🖼️ JPG' : '🖼️ حفظ JPG'); });
+    })();
+  }
+
+  /* ---------- المستمسكات: نفس رسم «حفظ PDF» لكل صفحة، والناتج صورة JPG لكل صفحة ---------- */
+  async function docsJpg(btn){
+    if(typeof buildPrintPages!=='function' || typeof drawDocsPageToPdf!=='function') return;
+    busy(btn, true);
+    try{
+      buildPrintPages();
+      var pages=Array.prototype.filter.call(document.querySelectorAll('#pages-container .a4-page'), function(p){ return getComputedStyle(p).display!=='none'; });
+      pages=pages.filter(function(p){ return p.querySelector('.slot img[src]'); });
+      if(!pages.length){ alert('لا توجد صور مضافة بعد.'); return; }
+      var d=new JpgDoc({ format:[PAGE_MM.W, PAGE_MM.H] });
+      for(var i=0;i<pages.length;i++){ if(i>0) d.addPage(); await drawDocsPageToPdf(d, pages[i]); }
+      var nm=document.getElementById('pdf-filename'); nm=(nm && nm.value ? nm.value.trim() : '') || 'مستمسكات';
+      await d.save(nm.replace(/\.(pdf|jpe?g)$/i,''));
+    }catch(e){ console.error(e); alert('تعذّر حفظ الصورة.'); }
+    finally{ busy(btn, false, btn.id==='pcJpgBtn' ? '🖼️ حفظ JPG' : '🖼️ JPG'); }
+  }
+
+  document.addEventListener('DOMContentLoaded', function(){
+    setTimeout(function(){
+      /* زر الصور الشخصية بجانب «حفظ PDF» */
+      var pdfTop=document.getElementById('pmPdfTop'), orig=document.getElementById('savePhotoPdfBtn');
+      if(pdfTop && orig && !document.getElementById('pmJpgTop')){
+        var b=document.createElement('button'); b.type='button'; b.id='pmJpgTop'; b.textContent='🖼️ JPG';
+        b.addEventListener('click', function(){ if(!b.disabled) photoJpg(b); });
+        var ph=document.querySelector('#photo-app .preview-area-header');
+        var place=function(){
+          if(ph && window.innerWidth<700){ if(b.parentNode!==ph){ ph.classList.add('has-jpg'); ph.appendChild(b); } }
+          else if(b.previousSibling!==pdfTop){ if(ph) ph.classList.remove('has-jpg'); pdfTop.parentNode.insertBefore(b, pdfTop.nextSibling); }
+          if(b.textContent.indexOf('⏳')<0) b.textContent=(b.parentNode===ph) ? '🖼️ JPG' : '🖼️ حفظ JPG';
+        };
+        place(); window.addEventListener('resize', place);
+        var sync=function(){ if(b.textContent.indexOf('⏳')<0) b.disabled=!!orig.disabled; };
+        new MutationObserver(sync).observe(orig, {attributes:true, attributeFilter:['disabled']}); sync();
+      }
+      /* زر المستمسكات بجانب «طباعة» */
+      var pr=document.getElementById('dmPrintBtn');
+      if(pr && !document.getElementById('dmJpgBtn')){
+        var j=document.createElement('button'); j.type='button'; j.className='dm-print'; j.id='dmJpgBtn'; j.textContent='🖼️ JPG';
+        j.addEventListener('click', function(){ if(!j.disabled) docsJpg(j); });
+        pr.parentNode.insertBefore(j, pr.nextSibling);
+      }
+      /* الحاسبة: بجانب «حفظ PDF» أسفل لوحة المستمسكات */
+      var sp=document.getElementById('btn-save-pdf');
+      if(sp && !document.getElementById('pcJpgBtn')){
+        var q=document.createElement('button'); q.type='button'; q.className=sp.className; q.id='pcJpgBtn'; q.textContent='🖼️ حفظ JPG';
+        q.addEventListener('click', function(){ if(!q.disabled) docsJpg(q); });
+        var row=sp.parentNode; q.style.cssText='display:block; width:100%; margin-top:8px;';
+        row.parentNode.insertBefore(q, row.nextSibling);
+      }
+    }, 0);
+  });
+})();
+</script>
 </body>
 </html>
