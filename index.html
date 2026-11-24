@@ -9852,14 +9852,36 @@ iget(function(r){
   }
 
   async function getMaskForImage(imgEl){
-    const seg = await initSegmentation();
-    return new Promise((resolve, reject)=>{
-      seg.onResults((results)=>{
-        try{ resolve(refinePersonMask(results.segmentationMask, imgEl)); }
-        catch(err){ reject(err); }
-      });
-      seg.send({ image: imgEl }).catch(reject);
-    });
+    /* الأداة مصممة للفيديو وتتذكر قناع الصورة السابقة وتخلطه بالجديدة (فتطلع الصورة الثانية بيضاء أحيانًا):
+       نمسح ذاكرتها قبل كل صورة، وإن رجع القناع فارغًا نعيد تشغيل الأداة من جديد ونحاول مرة ثانية */
+    for(let attempt = 0; attempt < 2; attempt++){
+      const seg = await initSegmentation();
+      if(typeof seg.reset === 'function'){ try{ await seg.reset(); }catch(e){} }
+      let out = null;
+      try{
+        out = await new Promise((resolve, reject)=>{
+          seg.onResults((results)=>{
+            try{ resolve(refinePersonMask(results.segmentationMask, imgEl)); }
+            catch(err){ reject(err); }
+          });
+          seg.send({ image: imgEl }).catch(reject);
+        });
+      }catch(err){ if(attempt) throw err; }
+      if(out && maskCoverage(out) > 0.003) return out;
+      try{ if(segmentationInstance && typeof segmentationInstance.close === 'function') await segmentationInstance.close(); }catch(e){}
+      segmentationInstance = null;
+    }
+    throw new Error('empty mask');
+  }
+  /* نسبة الشخص في القناع (0 = فارغ تمامًا) */
+  function maskCoverage(c){
+    try{
+      const s = document.createElement('canvas'); s.width = 64; s.height = 64;
+      const x = s.getContext('2d'); x.drawImage(c, 0, 0, 64, 64);
+      const d = x.getImageData(0, 0, 64, 64).data; let n = 0;
+      for(let i = 3; i < d.length; i += 4) if(d[i] > 32) n++;
+      return n / 4096;
+    }catch(e){ return 1; }
   }
 
   /* ---------- تحسين قناع الفصل (بدل الشدّ القاسي السابق الذي كان يسبب الدرجات وقص الأكتاف) ----------
